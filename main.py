@@ -1,5 +1,8 @@
+import os
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 from datetime import date
+from sheets_test import test_gsheet_connection
 
 class ReceiptSchema(BaseModel):
     vendor: str = Field(description="The name of the store or merchant")
@@ -7,8 +10,12 @@ class ReceiptSchema(BaseModel):
     transaction_date: date = Field(description="The date of the transaction")
     expense_type: str = Field(description="Category: e.g., Food, Transport, Software, Utilities")
 
+load_dotenv()
+
 def main():
-    print("Hello from receipt-uploader!")
+    spreadsheet_id = os.getenv("GOOGLE_SHEET_ID")
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    test_gsheet_connection(credentials_path, spreadsheet_id)
 
 if __name__ == "__main__":
     main()
