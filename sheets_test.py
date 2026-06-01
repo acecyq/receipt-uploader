@@ -11,7 +11,7 @@ SCOPES = [
 # 2. Tell Python where your downloaded credentials file lives
 SERVICE_ACCOUNT_FILE = 'credentials.json'
 
-def test_gsheet_connection(credentials_path, spreadsheet_id):
+def test_gsheet_connection(credentials_path: str, spreadsheet_id: str):
     # 3. Authenticate using the credentials and scopes
     creds = service_account.Credentials.from_service_account_file(
         credentials_path, scopes=SCOPES
