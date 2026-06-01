@@ -2,8 +2,7 @@ import os
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from datetime import date
-from sheets_test import test_gsheet_connection
-from pdf_reader import get_pdf_info
+from pdf_ai import pdf_info
 
 class ReceiptSchema(BaseModel):
     vendor: str = Field(description="The name of the store or merchant")
@@ -19,7 +18,7 @@ def main():
     # test_gsheet_connection(credentials_path, spreadsheet_id)
 
     receipt_path = os.getenv('RECEIPT_PATH')
-    get_pdf_info(receipt_path)
+    pdf_info(receipt_path)
 
 if __name__ == "__main__":
     main()

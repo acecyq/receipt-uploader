@@ -1,8 +1,6 @@
-import json
-import ollama
 from pypdf import PdfReader
 
-def get_pdf_info(pdf_path):
+def extract_pdf_text(pdf_path: str) -> str:
     try:
         print("Reading text from PDF...")
         # Extract text from the first page
@@ -13,31 +11,44 @@ def get_pdf_info(pdf_path):
         if not extracted_text.strip():
             raise Exception("PDF contains no readable text. It might be a scanned image. Use Method 1 instead.")
 
-        prompt = f"""
-        Analyze the following receipt text and extract the information.
-        Return the output strictly as a JSON object with these keys:
-        - vendor (string)
-        - date (string, formatted as YYYY-MM-DD if possible)
-        - transaction_amount (float or string with currency)
-        - type_of_expense (string)
+        # prompt = f"""
+        # Analyze the following receipt text and extract the information.
 
-        Receipt Text:
-        \"\"\"
-        {extracted_text}
-        \"\"\"
-        """
+        # Strictly map the following fields to these exact allowed categories (Enums):
+        # - 'type_of_expense': Choose ONLY from [Teaching materials, Supplies, Software, Utilities, Marketing, Transport, Equipment, Professional fees, Furniture, Rent, Training, Others]
+        # - 'payment_method': Choose ONLY from [Credit, Debit, PayNow, Cash]
 
-        print("Analyzing text with Ollama...")
-        # We can use a standard text model here, which is faster than a vision model
-        response = ollama.generate(
-            model='llama3.2', 
-            prompt=prompt,
-            format='json'
-        )
+        # Respond STRICTLY with a valid JSON object matching this schema:
+        # {{
+        # "vendor": "string",
+        # "date": "YYYY-MM-DD",
+        # "month": "MMM YYYY",
+        # "transaction_amount": float,
+        # "type_of_expense": "string (matching enums)",
+        # "payment_method": "string (matching enums)"
+        # }}
 
-        receipt_data = json.loads(response['response'].strip())
-        print("\n--- Extracted Information ---")
-        print(json.dumps(receipt_data, indent=4))
+        # Receipt Text:
+        # \"\"\"
+        # {extracted_text}
+        # \"\"\"
+        # """
+
+        # print("Analyzing text with Ollama...")
+        # # We can use a standard text model here, which is faster than a vision model
+        # response = ollama.generate(
+        #     model='llama3.2:latest', 
+        #     prompt=prompt,
+        #     format='json',
+        #     options={
+        #         'temperature': 0.0  # Forces deterministic, identical outputs on every run
+        #     }
+        # )
+
+        # receipt_data = json.loads(response['response'].strip())
+        # print("\n--- Extracted Information ---")
+        # print(json.dumps(receipt_data, indent=4))
+        return extracted_text
 
     except Exception as e:
         print(f"Error: {e}")
