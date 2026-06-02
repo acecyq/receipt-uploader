@@ -24,14 +24,14 @@ class ExtractedReceipt(BaseModel):
 
     # Enforce exact allowed enum strings here
     category: Literal[
-        "Teaching materials",
+        "Teaching Materials",
         "Supplies",
         "Software",
         "Utilities",
         "Marketing",
         "Transport",
         "Equipment",
-        "Professional fees",
+        "Professional Fees",
         "Furniture",
         "Rent",
         "Training",

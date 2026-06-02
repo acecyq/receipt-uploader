@@ -30,3 +30,8 @@ line-length = 120
 # This makes it behave exactly like the popular 'isort' package
 combine-as-imports = true
 lines-after-imports = 2
+
+[tool.uv.scripts]
+lint = "ruff check --fix"
+format = "ruff format"
+tidy = "ruff check --fix && ruff format"
