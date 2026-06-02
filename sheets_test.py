@@ -1,6 +1,7 @@
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+
 # 1. Define the permissions (scopes) your script needs
 # We are asking for access to both Google Drive and Google Sheets
 SCOPES = [
@@ -26,6 +27,6 @@ def test_gsheet_connection(credentials_path: str, spreadsheet_id: str):
         sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         title = sheet_metadata.get('properties', {}).get('title')
         print(f"🎉 Success! Connected to spreadsheet: '{title}'")
-        
+
     except Exception as e:
         print(f"❌ Error connecting to Google Sheets: {e}")

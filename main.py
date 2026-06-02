@@ -1,8 +1,11 @@
 import os
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
 from datetime import date
+
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
 from pdf_ai import pdf_info
+
 
 class ReceiptSchema(BaseModel):
     vendor: str = Field(description="The name of the store or merchant")

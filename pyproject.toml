@@ -15,3 +15,17 @@ dependencies = [
     "pypdf>=6.12.2",
     "python-dotenv>=1.2.2",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.15",
+]
+
+[tool.ruff]
+# Enable linting rules for pyflakes (F), pycodestyle (E, W), and isort (I)
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.isort]
+# This makes it behave exactly like the popular 'isort' package
+combine-as-imports = true
+lines-after-imports = 2

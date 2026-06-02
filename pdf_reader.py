@@ -1,5 +1,6 @@
 from pypdf import PdfReader
 
+
 def extract_pdf_text(pdf_path: str) -> str:
     try:
         print("Reading text from PDF...")
@@ -37,7 +38,7 @@ def extract_pdf_text(pdf_path: str) -> str:
         # print("Analyzing text with Ollama...")
         # # We can use a standard text model here, which is faster than a vision model
         # response = ollama.generate(
-        #     model='llama3.2:latest', 
+        #     model='llama3.2:latest',
         #     prompt=prompt,
         #     format='json',
         #     options={
