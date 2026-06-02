@@ -11,17 +11,33 @@ from pdf_reader import extract_pdf_text
 # 1. Define your rigid data schema using Pydantic
 class ExtractedReceipt(BaseModel):
     # Enforcing strict ISO format string
-    date: str = Field(description="The date of the receipt strictly in YYYY-MM-DD format only.")
-    month: str = Field(description="The month and year in MMM YYYY format (e.g., May 2026).")
+    date: str = Field(
+        description="The date of the receipt strictly in YYYY-MM-DD format only."
+    )
+    month: str = Field(
+        description="The month and year in MMM YYYY format (e.g., May 2026)."
+    )
     vendor: str = Field(description="The name of the store or merchant")
-    description: str = Field(description="A brief description of what is purchased in less than 5 words")
+    description: str = Field(
+        description="A brief description of what is purchased in less than 5 words"
+    )
 
     # Enforce exact allowed enum strings here
     category: Literal[
-        'Teaching materials', 'Supplies', 'Software', 'Utilities', 'Marketing', 'Transport',
-        'Equipment', 'Professional fees', 'Furniture', 'Rent', 'Training', 'Others'
+        "Teaching materials",
+        "Supplies",
+        "Software",
+        "Utilities",
+        "Marketing",
+        "Transport",
+        "Equipment",
+        "Professional fees",
+        "Furniture",
+        "Rent",
+        "Training",
+        "Others",
     ]
-    payment_method: Literal['Credit', 'Debit', 'PayNow', 'Cash']
+    payment_method: Literal["Credit", "Debit", "PayNow", "Cash"]
     amount: float = Field(description="The total amount paid")
 
     def verify_and_correct(self):
@@ -43,7 +59,9 @@ class ExtractedReceipt(BaseModel):
                     try:
                         setattr(self, key, float(user_input))
                     except ValueError:
-                        print(f"⚠️ Invalid number format. Keeping original value: {current_value}")
+                        print(
+                            f"⚠️ Invalid number format. Keeping original value: {current_value}"
+                        )
                 else:
                     setattr(self, key, user_input)
 
@@ -55,10 +73,10 @@ class ExtractedReceipt(BaseModel):
         """
         print(f"\nSaving data for '{self.vendor}' to Google Sheets...")
         try:
-            credentials_filepath = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            credentials_filepath = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
             gc = gspread.service_account(filename=credentials_filepath)
 
-            spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
+            spreadsheet_id = os.getenv("GOOGLE_SHEET_ID")
             sheet = gc.open_by_key(spreadsheet_id).sheet1
 
             # Map the self attributes directly to your spreadsheet row
@@ -68,10 +86,10 @@ class ExtractedReceipt(BaseModel):
                 self.vendor,
                 self.description,
                 self.category,
-                'Tuition',
+                "Tuition",
                 self.payment_method,
                 self.amount,
-                'url'
+                "url",
             ]
 
             sheet.append_row(row_to_append)
@@ -80,14 +98,16 @@ class ExtractedReceipt(BaseModel):
         except Exception as e:
             print(f"❌ Failed to update Google Sheets: {e}")
 
+
 def pdf_info(pdf_path):
     extracted_text = extract_pdf_text(pdf_path)
 
     # 2. Refine the prompt to explicitly mention your transformation rules
     prompt = f"""
     Analyze the following text extracted from a document. Extract the data accurately according to these specific rules:
-    - Convert any date found into a strict 'YYYY-MM-DD' format (e.g., if you see '11/05/26', convert it to '2026-05-11').
-    - Classify the category carefully. Items meant for educational use or curriculum must be categorized as 'Teaching Materials'. Do not use raw text items like 'Merchandise Subtotal' as the type of expense.
+    - Convert any date found into a strict 'YYYY-MM-DD' format (e.g., if you see '11/05/26', convert it to '2026-05-11')
+    - Classify category carefully. Items meant for teaching or curriculum must be categorized as 'Teaching Materials'
+    - Do not use raw text items like 'Merchandise Subtotal' as the type of expense.
 
     Extracted Text:
     \"\"\"
@@ -97,25 +117,24 @@ def pdf_info(pdf_path):
 
     # 3. Request the structured completion from Ollama
     response = ollama.generate(
-        model='llama3.2:latest',
+        model="llama3.2:latest",
         prompt=prompt,
-
         # .model_json_schema() converts your Python class into a valid JSON schema constraints ruleset
         format=ExtractedReceipt.model_json_schema(),
         options={
-            'temperature': 0.0 # Eliminates creativity entirely
-        }
+            "temperature": 0.0  # Eliminates creativity entirely
+        },
     )
 
     # 1. Check if the response contains the 'response' key
-    if response and 'response' in response:
+    if response and "response" in response:
         try:
             # 2. Extract the string and parse it using .model_validate_json()
-            receipt = ExtractedReceipt.model_validate_json(response['response'])
+            receipt = ExtractedReceipt.model_validate_json(response["response"])
 
             # 3. Run your interactive correction method
             receipt.verify_and_correct()
 
         except Exception as e:
             print(f"Failed to parse or validate the AI response: {e}")
-            print("Raw text was:", response['response'])
+            print("Raw text was:", response["response"])

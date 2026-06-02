@@ -24,6 +24,7 @@ dev = [
 [tool.ruff]
 # Enable linting rules for pyflakes (F), pycodestyle (E, W), and isort (I)
 select = ["E", "F", "W", "I"]
+line-length = 120
 
 [tool.ruff.lint.isort]
 # This makes it behave exactly like the popular 'isort' package
