@@ -1,3 +1,5 @@
+import os
+import gspread
 import ollama
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -18,6 +20,62 @@ class ExtractedReceipt(BaseModel):
     ]
     payment_method: Literal['Credit', 'Debit', 'PayNow', 'Cash']
     amount: float = Field(description="The total amount paid")
+
+    def verify_and_correct(self):
+        """
+        Interactively prompts the user to verify each field on this instance.
+        Updates the instance attributes directly in place.
+        """
+        print("\n==== 📝 REVIEW EXTRACTED DATA ====")
+        print("Press [ENTER] to accept the value, or type the correction below:\n")
+        
+        # We loop through self.model_dump() to get key-value pairs
+        for key, current_value in self.model_dump().items():
+            display_key = key.replace("_", " ").title()
+            user_input = input(f"{display_key} [{current_value}]: ").strip()
+            
+            if user_input != "":
+                # Dynamically update the attribute on 'self' if the user types a correction
+                if isinstance(current_value, float):
+                    try:
+                        setattr(self, key, float(user_input))
+                    except ValueError:
+                        print(f"⚠️ Invalid number format. Keeping original value: {current_value}")
+                else:
+                    setattr(self, key, user_input)
+        
+        print(self.model_dump_json())
+    
+    def save_to_google_sheets(self):
+        """
+        Appends this specific instance's data into Google Sheets.
+        """
+        print(f"\nSaving data for '{self.vendor}' to Google Sheets...")
+        try:
+            credentials_filepath = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            gc = gspread.service_account(filename=credentials_filepath)
+            
+            spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
+            sheet = gc.open_by_key(spreadsheet_id).sheet1
+            
+            # Map the self attributes directly to your spreadsheet row
+            row_to_append = [
+                self.date,
+                self.month,
+                self.vendor,
+                self.description,
+                self.category,
+                'Tuition',
+                self.payment_method,
+                self.amount,
+                'url'
+            ]
+            
+            sheet.append_row(row_to_append)
+            print("✅ Successfully added to Google Sheets!")
+            
+        except Exception as e:
+            print(f"❌ Failed to update Google Sheets: {e}")
 
 def pdf_info(pdf_path):
     extracted_text = extract_pdf_text(pdf_path)
@@ -46,5 +104,15 @@ def pdf_info(pdf_path):
         }
     )
 
-    # Print the resulting perfectly-conformed object
-    print(response['response'])
+    # 1. Check if the response contains the 'response' key
+    if response and 'response' in response:
+        try:
+            # 2. Extract the string and parse it using .model_validate_json()
+            receipt = ExtractedReceipt.model_validate_json(response['response'])
+            
+            # 3. Run your interactive correction method
+            receipt.verify_and_correct()
+            
+        except Exception as e:
+            print(f"Failed to parse or validate the AI response: {e}")
+            print("Raw text was:", response['response'])

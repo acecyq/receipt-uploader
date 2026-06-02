@@ -9,6 +9,7 @@ dependencies = [
     "google-auth>=2.53.0",
     "google-auth-httplib2>=0.4.0",
     "google-auth-oauthlib>=1.4.0",
+    "gspread>=6.2.1",
     "ollama>=0.6.2",
     "pydantic>=2.13.4",
     "pypdf>=6.12.2",
