@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Google Cloud credentials
-credentials.json
+*credentials.json
 token.json
 
 # Environment Variables
