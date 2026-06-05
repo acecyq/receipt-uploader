@@ -1,8 +1,12 @@
 import os
-from typing import Literal
+from typing import Literal, Optional
 
 import gspread
 import ollama
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 from pydantic import BaseModel, Field
 
 from pdf_reader import extract_pdf_text
@@ -39,6 +43,13 @@ class ExtractedReceipt(BaseModel):
     ]
     payment_method: Literal["Credit", "Debit", "PayNow", "Cash"]
     amount: float = Field(description="The total amount paid")
+    suggested_filename: str = Field(
+        description="A clean filename formatted exactly as: description_DDMMYY.pdf. "
+                    "Remove spaces, punctuation, or special characters from the vendor name, "
+                    "make it lowercase, and replace spaces with underscores. "
+                    "Example: 'quantum_leap_math_assessment-020326.pdf'"
+    )
+    drive_url: Optional[str] = None
 
     def verify_and_correct(self):
         """
@@ -67,37 +78,109 @@ class ExtractedReceipt(BaseModel):
 
         print(self.model_dump_json())
 
-    def save_to_google_sheets(self):
+    def save_to_google_sheets(self, credentials_filename: str):
         """
-        Appends this specific instance's data into Google Sheets.
+        Inserts the transaction data chronologically into the sheet based on date,
+        including a clickable hyperlink to the Google Drive file.
         """
-        print(f"\nSaving data for '{self.vendor}' to Google Sheets...")
+        print(f"\nSorting and saving data for '{self.vendor}' to Google Sheets...")
         try:
-            credentials_filepath = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            gc = gspread.service_account(filename=credentials_filepath)
+            gc = gspread.service_account(filename=credentials_filename)
 
-            spreadsheet_id = os.getenv("GOOGLE_SHEET_ID")
-            sheet = gc.open_by_key(spreadsheet_id).sheet1
+            spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
+            worksheet = gc.open_by_key(spreadsheet_id).sheet1
 
-            # Map the self attributes directly to your spreadsheet row
-            row_to_append = [
+            # 1. Fetch all existing data rows
+            all_values = worksheet.get_all_values()
+
+            # Separate headers from data so we don't accidentally sort the top row
+            header = all_values[0] if all_values else ["Date", "Month", "Vendor", "Expense Type",
+                                                       "Payment Method", "Amount", "File Link"]
+            existing_data = all_values[1:] if len(all_values) > 1 else []
+
+            # 2. Build the new row layout matching your screenshot columns
+            # Using Google Sheet formula for a clean clickable link text
+            link_formula = f'=HYPERLINK("{self.drive_url}", "{self.suggested_filename}")' if self.drive_url else ""
+
+            new_row = [
                 self.date,
                 self.month,
                 self.vendor,
-                self.description,
-                self.category,
-                "Tuition",
+                self.type_of_expense,
                 self.payment_method,
-                self.amount,
-                "url",
+                f"S${self.transaction_amount:.2f}", # Formats nicely as S$19.98
+                link_formula
             ]
 
-            sheet.append_row(row_to_append)
-            print("✅ Successfully added to Google Sheets!")
+            # 3. Add the new row to our dataset list
+            existing_data.append(new_row)
+
+            # 4. Sort the entire list chronologically by the Date column (index 0)
+            # lambda x: x[0] ensures it reads the YYYY-MM-DD string perfectly
+            existing_data.sort(key=lambda x: x[0])
+
+            # 5. Clear the old rows and write the fresh, perfectly sorted table back
+            worksheet.clear()
+            worksheet.update('A1', [header] + existing_data, value_input_option='USER_ENTERED')
+
+            print("✅ Successfully sorted and synced table with Google Sheets!")
 
         except Exception as e:
             print(f"❌ Failed to update Google Sheets: {e}")
 
+    def upload_to_google_drive(self, credentials_filename: str, local_pdf_path: str, folder_id: str = None) -> str:
+        """
+        Uploads the local PDF file directly as the authenticated user,
+        completely bypassing Service Account storage quota limitations.
+        """
+        print(f"Uploading file to Google Drive as '{self.suggested_filename}'...")
+
+        # We use the full drive scope as an actual user
+        SCOPES = ['https://www.googleapis.com/auth/drive']
+        creds = None
+
+        # token.json stores your user access/refresh tokens after logging in once
+        if os.path.exists('token.json'):
+            from google.oauth2.credentials import Credentials as UserCredentials
+            creds = UserCredentials.from_authorized_user_file('token.json', SCOPES)
+
+        # If there are no valid credentials available, let the user log in
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(credentials_filename, SCOPES)
+                creds = flow.run_local_server(port=0)
+            # Save the credentials for the next run
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+
+        try:
+            service = build('drive', 'v3', credentials=creds)
+
+            file_metadata = {'name': self.suggested_filename}
+            if folder_id:
+                file_metadata['parents'] = [folder_id]
+
+            media = MediaFileUpload(local_pdf_path, mimetype='application/pdf')
+
+            # This will execute flawlessly because it's using your account's massive storage quota
+            uploaded_file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+            file_id = uploaded_file.get('id')
+
+            # Construct the standard shareable link
+            self.drive_url = f"https://drive.google.com/file/d/{file_id}/view"
+            print("✅ Successfully uploaded to Drive! URL generated.")
+            return self.drive_url
+
+        except Exception as e:
+            print(f"❌ Failed to upload to Google Drive: {e}")
+            return None
 
 def pdf_info(pdf_path):
     extracted_text = extract_pdf_text(pdf_path)
@@ -134,6 +217,13 @@ def pdf_info(pdf_path):
 
             # 3. Run your interactive correction method
             receipt.verify_and_correct()
+
+            credentials_filename = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            pdf_filepath = os.getenv('RECEIPT_PATH')
+            google_drive_folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
+
+            # 4. Upload the receipt PDF to Google Drive
+            receipt.upload_to_google_drive(credentials_filename, pdf_filepath, google_drive_folder_id)
 
         except Exception as e:
             print(f"Failed to parse or validate the AI response: {e}")
