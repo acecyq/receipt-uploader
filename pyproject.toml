@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "customtkinter>=5.2.2",
     "google-api-python-client>=2.197.0",
     "google-auth>=2.53.0",
     "google-auth-httplib2>=0.4.0",

@@ -29,18 +29,18 @@ class ExtractedReceipt(BaseModel):
 
     # Enforce exact allowed enum strings here
     category: Literal[
-        "Teaching Materials (books/worksheets)",
-        "Supplies",
-        "Software",
-        "Utilities",
-        "Marketing",
+        "Teaching materials (books/worksheets)",
+        "Supplies (stationery/printing/snacks)",
+        "Software & subscriptions",
+        "Utilities (electricity/water/internet)",
+        "Marketing & advertising",
         "Transport",
-        "Equipment",
-        "Professional Fees",
+        "Equipment & devices",
+        "Professional fees",
         "Furniture",
         "Rent",
         "Training",
-        "Others",
+        "Other",
     ]
     payment_method: Literal["Card", "Debit", "PayNow", "Cash"]
     amount: float = Field(description="The total amount paid")
@@ -81,26 +81,22 @@ class ExtractedReceipt(BaseModel):
 
     def save_to_google_sheets(self, authenticated_creds):
         """
-        Inserts transaction data chronologically, preserves row 4+ visual formatting, 
-        and explicitly re-applies data validation dropdown rules using batch_update.
+        Appends data to the bottom, applies formatting, and asks Google Sheets
+        to natively sort the sheet. This permanently protects all manual hyperlinks!
         """
-        print(f"\nSorting and saving data for '{self.vendor}' to Google Sheets...")
+        print(f"\nAppending and sorting data natively for '{self.vendor}'...")
         try:
-            from gspread_formatting import cellFormat, format_cell_range
 
             gc = gspread.authorize(authenticated_creds)
             spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
             spreadsheet = gc.open_by_key(spreadsheet_id)
             worksheet = spreadsheet.worksheet("Expenses")
 
-            # 1. Fetch ALL values currently on the sheet
+            # 1. Find the next truly empty row
             all_values = worksheet.get_all_values()
+            next_row_index = len(all_values) + 1  # 1-indexed for standard API calls
 
-            # 2. Isolate data rows from Row 4 onwards
-            data_rows = all_values[3:] if len(all_values) > 3 else []
-            data_rows = [row for row in data_rows if any(cell.strip() for cell in row)]
-
-            # 3. Build the new row layout matching your columns
+            # 2. Build the new row layout
             link_formula = f'=HYPERLINK("{self.drive_url}", "{self.suggested_filename}")' if self.drive_url else ""
 
             new_row = [
@@ -116,57 +112,77 @@ class ExtractedReceipt(BaseModel):
                 ""
             ]
 
-            # 4. Append and sort data rows
-            data_rows.append(new_row)
-            data_rows.sort(key=lambda x: x[0])
+            # 3. Append the new row to the very bottom
+            worksheet.update(f'A{next_row_index}', [new_row], value_input_option='USER_ENTERED')
 
-            # 5. Overwrite data rows starting exactly at cell A4
-            worksheet.update('A4', data_rows, value_input_option='USER_ENTERED')
-
-            # 6. FIX ALIGNMENT AND FORMATTING
-            total_data_rows = len(data_rows)
-            end_row = 3 + total_data_rows  # Dynamic calculation of where data ends
-
-            # Center-align columns A, B, G, H, I
-            center_format = cellFormat(horizontalAlignment='CENTER')
-            format_cell_range(worksheet, f'A4:B{end_row}', center_format)
-            format_cell_range(worksheet, f'G4:I{end_row}', center_format)
-
-            # Left-align columns C, D, E, F, J
-            left_format = cellFormat(horizontalAlignment='LEFT')
-            format_cell_range(worksheet, f'C4:F{end_row}', left_format)
-            format_cell_range(worksheet, f'J4:J{end_row}', left_format)
-
-            # 🌟 CORRECTED: RE-APPLY THE DROPDOWN MENUS VIA BATCH UPDATE 🌟
-            # Google Sheets API coordinates are 0-indexed (Row 4 is index 3, Column E is index 4, etc.)
+            # 4. NATIVE FORMAT CLONING & SORT
+            # Google's API uses 0-indexing for batch updates
             body = {
                 "requests": [
+                    # A. Clone EXACT visual formatting (Alignments, Fonts, Clip) from Row 4 to the new row
                     {
                         "copyPaste": {
                             "source": {
                                 "sheetId": worksheet.id,
-                                "startRowIndex": 3,      # Row 4
-                                "endRowIndex": 4,        # Up to Row 5 (exclusive)
-                                "startColumnIndex": 4,   # Column E (Category)
-                                "endColumnIndex": 7      # Up to Column H (exclusive -> covers E, F, G)
+                                "startRowIndex": 3,               # Row 4
+                                "endRowIndex": 4,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": 10
                             },
                             "destination": {
                                 "sheetId": worksheet.id,
-                                "startRowIndex": 3,      # Row 4
-                                "endRowIndex": end_row,  # Down to the very last data row
-                                "startColumnIndex": 4,   # Column E
-                                "endColumnIndex": 7      # Up to Column H
+                                "startRowIndex": next_row_index - 1,
+                                "endRowIndex": next_row_index,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": 10
                             },
-                            "pasteType": "PASTE_DATA_VALIDATION"  # Copies ONLY dropdown rule logic
+                            "pasteType": "PASTE_FORMAT"           # Copies visual layout only
+                        }
+                    },
+                    # B. Copy Validation (Dropdowns) from Row 4 to the new row
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 3,
+                                "endRowIndex": 4,
+                                "startColumnIndex": 4,
+                                "endColumnIndex": 7
+                            },
+                            "destination": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": next_row_index - 1,
+                                "endRowIndex": next_row_index,
+                                "startColumnIndex": 4,
+                                "endColumnIndex": 7
+                            },
+                            "pasteType": "PASTE_DATA_VALIDATION"  # Copies dropdown rules only
+                        }
+                    },
+                    # C. NATIVELY SORT THE RANGE
+                    {
+                        "sortRange": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 3,
+                                "endRowIndex": next_row_index,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": 10
+                            },
+                            "sortSpecs": [
+                                {
+                                    "dimensionIndex": 0,
+                                    "sortOrder": "ASCENDING"
+                                }
+                            ]
                         }
                     }
                 ]
             }
 
-            # Fire the low-level API request
             spreadsheet.batch_update(body)
 
-            print("✅ Successfully sorted, formatted, and synced table with Google Sheets!")
+            print("✅ Successfully appended, natively sorted, and formatted Google Sheets!")
 
         except Exception as e:
             print(f"❌ Failed to update Google Sheets: {e}")
@@ -230,13 +246,13 @@ class ExtractedReceipt(BaseModel):
             print(f"❌ Failed to upload to Google Drive: {e}")
             return None
 
-def pdf_info(pdf_path) -> ExtractedReceipt:
+def pdf_info(pdf_path, cli_mode=True) -> ExtractedReceipt: # <-- Added parameter
     extracted_text = extract_pdf_text(pdf_path)
 
-    # 2. Refine the prompt to explicitly mention your transformation rules
     prompt = f"""
     Analyze the following text extracted from a document. Extract the data accurately according to these specific rules:
     - Convert any date found into a strict 'YYYY-MM-DD' format (e.g., if you see '11/05/26', convert it to '2026-05-11')
+    - Month should be in the 'MMM YYYY' format.
     - Classify category carefully. Items meant for teaching or curriculum must be categorized as 'Teaching Materials'
     - Do not use raw text items like 'Merchandise Subtotal' as the type of expense.
 
@@ -246,25 +262,22 @@ def pdf_info(pdf_path) -> ExtractedReceipt:
     \"\"\"
     """
 
-    # 3. Request the structured completion from Ollama
     response = ollama.generate(
         model="llama3.2:latest",
         prompt=prompt,
-        # .model_json_schema() converts your Python class into a valid JSON schema constraints ruleset
         format=ExtractedReceipt.model_json_schema(),
         options={
-            "temperature": 0.0  # Eliminates creativity entirely
+            "temperature": 0.0
         },
     )
 
-    # 1. Check if the response contains the 'response' key
     if response and "response" in response:
         try:
-            # 2. Extract the string and parse it using .model_validate_json()
             receipt = ExtractedReceipt.model_validate_json(response["response"])
 
-            # 3. Run your interactive correction method
-            receipt.verify_and_correct()
+            # 🌟 Only run the terminal input prompt if we are in CLI mode!
+            if cli_mode:
+                receipt.verify_and_correct()
 
             return receipt
 
