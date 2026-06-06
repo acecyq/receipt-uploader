@@ -29,7 +29,7 @@ class ExtractedReceipt(BaseModel):
 
     # Enforce exact allowed enum strings here
     category: Literal[
-        "Teaching Materials",
+        "Teaching Materials (books/worksheets)",
         "Supplies",
         "Software",
         "Utilities",
@@ -42,7 +42,7 @@ class ExtractedReceipt(BaseModel):
         "Training",
         "Others",
     ]
-    payment_method: Literal["Credit", "Debit", "PayNow", "Cash"]
+    payment_method: Literal["Card", "Debit", "PayNow", "Cash"]
     amount: float = Field(description="The total amount paid")
     suggested_filename: str = Field(
         description="A clean filename formatted exactly as: description_DDMMYY.pdf. "
@@ -81,23 +81,23 @@ class ExtractedReceipt(BaseModel):
 
     def save_to_google_sheets(self, authenticated_creds):
         """
-        Inserts the transaction data chronologically into the sheet starting at row 4,
-        leaving your titles, instructions, and headers completely untouched.
+        Inserts transaction data chronologically, preserves row 4+ visual formatting, 
+        and explicitly re-applies data validation dropdown rules using batch_update.
         """
         print(f"\nSorting and saving data for '{self.vendor}' to Google Sheets...")
         try:
+            from gspread_formatting import cellFormat, format_cell_range
+
             gc = gspread.authorize(authenticated_creds)
             spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
-            worksheet = gc.open_by_key(spreadsheet_id).worksheet("Expenses")
+            spreadsheet = gc.open_by_key(spreadsheet_id)
+            worksheet = spreadsheet.worksheet("Expenses")
 
             # 1. Fetch ALL values currently on the sheet
             all_values = worksheet.get_all_values()
 
-            # 2. Isolate JUST the data rows (Row 4 onwards -> index 3)
-            # This completely safeguards rows 1, 2, and 3 from being mixed into the sort
+            # 2. Isolate data rows from Row 4 onwards
             data_rows = all_values[3:] if len(all_values) > 3 else []
-
-            # Clean out any trailing blank lines so they don't break the sorting logic
             data_rows = [row for row in data_rows if any(cell.strip() for cell in row)]
 
             # 3. Build the new row layout matching your columns
@@ -116,17 +116,57 @@ class ExtractedReceipt(BaseModel):
                 ""
             ]
 
-            # 4. Add the new row to our dataset list
+            # 4. Append and sort data rows
             data_rows.append(new_row)
-
-            # 5. Sort the data list chronologically by the Date column (index 0)
             data_rows.sort(key=lambda x: x[0])
 
-            # 6. Overwrite the data rows starting EXACTLY at cell A4
-            # This guarantees your top 3 rows never change or lose their layout/formatting!
+            # 5. Overwrite data rows starting exactly at cell A4
             worksheet.update('A4', data_rows, value_input_option='USER_ENTERED')
 
-            print("✅ Successfully sorted and synced table with Google Sheets!")
+            # 6. FIX ALIGNMENT AND FORMATTING
+            total_data_rows = len(data_rows)
+            end_row = 3 + total_data_rows  # Dynamic calculation of where data ends
+
+            # Center-align columns A, B, G, H, I
+            center_format = cellFormat(horizontalAlignment='CENTER')
+            format_cell_range(worksheet, f'A4:B{end_row}', center_format)
+            format_cell_range(worksheet, f'G4:I{end_row}', center_format)
+
+            # Left-align columns C, D, E, F, J
+            left_format = cellFormat(horizontalAlignment='LEFT')
+            format_cell_range(worksheet, f'C4:F{end_row}', left_format)
+            format_cell_range(worksheet, f'J4:J{end_row}', left_format)
+
+            # 🌟 CORRECTED: RE-APPLY THE DROPDOWN MENUS VIA BATCH UPDATE 🌟
+            # Google Sheets API coordinates are 0-indexed (Row 4 is index 3, Column E is index 4, etc.)
+            body = {
+                "requests": [
+                    {
+                        "copyPaste": {
+                            "source": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 3,      # Row 4
+                                "endRowIndex": 4,        # Up to Row 5 (exclusive)
+                                "startColumnIndex": 4,   # Column E (Category)
+                                "endColumnIndex": 7      # Up to Column H (exclusive -> covers E, F, G)
+                            },
+                            "destination": {
+                                "sheetId": worksheet.id,
+                                "startRowIndex": 3,      # Row 4
+                                "endRowIndex": end_row,  # Down to the very last data row
+                                "startColumnIndex": 4,   # Column E
+                                "endColumnIndex": 7      # Up to Column H
+                            },
+                            "pasteType": "PASTE_DATA_VALIDATION"  # Copies ONLY dropdown rule logic
+                        }
+                    }
+                ]
+            }
+
+            # Fire the low-level API request
+            spreadsheet.batch_update(body)
+
+            print("✅ Successfully sorted, formatted, and synced table with Google Sheets!")
 
         except Exception as e:
             print(f"❌ Failed to update Google Sheets: {e}")
