@@ -1,19 +1,8 @@
 import os
-from datetime import date
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
 
 from pdf_ai import pdf_info
-
-
-class ReceiptSchema(BaseModel):
-    vendor: str = Field(description="The name of the store or merchant")
-    total_amount: float = Field(description="The total amount paid, including GST")
-    transaction_date: date = Field(description="The date of the transaction")
-    expense_type: str = Field(
-        description="Category: e.g., Food, Transport, Software, Utilities"
-    )
 
 
 load_dotenv()
@@ -24,8 +13,13 @@ def main():
     # credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     # test_gsheet_connection(credentials_path, spreadsheet_id)
 
+    credentials_filename = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
     receipt_path = os.getenv("RECEIPT_PATH")
-    pdf_info(receipt_path)
+    google_drive_folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
+
+    receipt = pdf_info(receipt_path)
+    authenticated_creds = receipt.upload_to_google_drive(credentials_filename, receipt_path, google_drive_folder_id)
+    receipt.save_to_google_sheets(authenticated_creds)
 
 
 if __name__ == "__main__":

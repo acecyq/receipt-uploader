@@ -4,6 +4,7 @@ from typing import Literal, Optional
 import gspread
 import ollama
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials as UserCredentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -78,57 +79,64 @@ class ExtractedReceipt(BaseModel):
 
         print(self.model_dump_json())
 
-    def save_to_google_sheets(self, credentials_filename: str):
+    def save_to_google_sheets(self, authenticated_creds):
         """
-        Inserts the transaction data chronologically into the sheet based on date,
-        including a clickable hyperlink to the Google Drive file.
+        Inserts the transaction data chronologically into the sheet starting at row 4,
+        leaving your titles, instructions, and headers completely untouched.
         """
         print(f"\nSorting and saving data for '{self.vendor}' to Google Sheets...")
         try:
-            gc = gspread.service_account(filename=credentials_filename)
-
+            gc = gspread.authorize(authenticated_creds)
             spreadsheet_id = os.getenv('GOOGLE_SHEET_ID')
-            worksheet = gc.open_by_key(spreadsheet_id).sheet1
+            worksheet = gc.open_by_key(spreadsheet_id).worksheet("Expenses")
 
-            # 1. Fetch all existing data rows
+            # 1. Fetch ALL values currently on the sheet
             all_values = worksheet.get_all_values()
 
-            # Separate headers from data so we don't accidentally sort the top row
-            header = all_values[0] if all_values else ["Date", "Month", "Vendor", "Expense Type",
-                                                       "Payment Method", "Amount", "File Link"]
-            existing_data = all_values[1:] if len(all_values) > 1 else []
+            # 2. Isolate JUST the data rows (Row 4 onwards -> index 3)
+            # This completely safeguards rows 1, 2, and 3 from being mixed into the sort
+            data_rows = all_values[3:] if len(all_values) > 3 else []
 
-            # 2. Build the new row layout matching your screenshot columns
-            # Using Google Sheet formula for a clean clickable link text
+            # Clean out any trailing blank lines so they don't break the sorting logic
+            data_rows = [row for row in data_rows if any(cell.strip() for cell in row)]
+
+            # 3. Build the new row layout matching your columns
             link_formula = f'=HYPERLINK("{self.drive_url}", "{self.suggested_filename}")' if self.drive_url else ""
 
             new_row = [
                 self.date,
                 self.month,
                 self.vendor,
-                self.type_of_expense,
+                self.description,
+                self.category,
+                'Tuition',
                 self.payment_method,
-                f"S${self.transaction_amount:.2f}", # Formats nicely as S$19.98
-                link_formula
+                f"S${self.amount:.2f}",
+                link_formula,
+                ""
             ]
 
-            # 3. Add the new row to our dataset list
-            existing_data.append(new_row)
+            # 4. Add the new row to our dataset list
+            data_rows.append(new_row)
 
-            # 4. Sort the entire list chronologically by the Date column (index 0)
-            # lambda x: x[0] ensures it reads the YYYY-MM-DD string perfectly
-            existing_data.sort(key=lambda x: x[0])
+            # 5. Sort the data list chronologically by the Date column (index 0)
+            data_rows.sort(key=lambda x: x[0])
 
-            # 5. Clear the old rows and write the fresh, perfectly sorted table back
-            worksheet.clear()
-            worksheet.update('A1', [header] + existing_data, value_input_option='USER_ENTERED')
+            # 6. Overwrite the data rows starting EXACTLY at cell A4
+            # This guarantees your top 3 rows never change or lose their layout/formatting!
+            worksheet.update('A4', data_rows, value_input_option='USER_ENTERED')
 
             print("✅ Successfully sorted and synced table with Google Sheets!")
 
         except Exception as e:
             print(f"❌ Failed to update Google Sheets: {e}")
 
-    def upload_to_google_drive(self, credentials_filename: str, local_pdf_path: str, folder_id: str = None) -> str:
+    def upload_to_google_drive(
+            self,
+            credentials_filename: str,
+            local_pdf_path: str,
+            folder_id: str = None
+        ) -> UserCredentials:
         """
         Uploads the local PDF file directly as the authenticated user,
         completely bypassing Service Account storage quota limitations.
@@ -176,13 +184,13 @@ class ExtractedReceipt(BaseModel):
             # Construct the standard shareable link
             self.drive_url = f"https://drive.google.com/file/d/{file_id}/view"
             print("✅ Successfully uploaded to Drive! URL generated.")
-            return self.drive_url
+            return creds
 
         except Exception as e:
             print(f"❌ Failed to upload to Google Drive: {e}")
             return None
 
-def pdf_info(pdf_path):
+def pdf_info(pdf_path) -> ExtractedReceipt:
     extracted_text = extract_pdf_text(pdf_path)
 
     # 2. Refine the prompt to explicitly mention your transformation rules
@@ -218,12 +226,7 @@ def pdf_info(pdf_path):
             # 3. Run your interactive correction method
             receipt.verify_and_correct()
 
-            credentials_filename = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            pdf_filepath = os.getenv('RECEIPT_PATH')
-            google_drive_folder_id = os.getenv('GOOGLE_DRIVE_FOLDER_ID')
-
-            # 4. Upload the receipt PDF to Google Drive
-            receipt.upload_to_google_drive(credentials_filename, pdf_filepath, google_drive_folder_id)
+            return receipt
 
         except Exception as e:
             print(f"Failed to parse or validate the AI response: {e}")
